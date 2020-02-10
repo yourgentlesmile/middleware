@@ -81,6 +81,8 @@ bin/kafka-console-consumer.sh --topic first --boostrap-servereper hadoop102:2181
 
     一个topic分为多个partition，一个partition分为多个segment，一个segment对应两个文件.log、.index文件，由于生产者生产的雄安锡会不断追加到log文件末尾，为防止log文件过大导致数据定位效率低下，kafka采取了分片和索引机制，将每个partition分为多个segment，每个segment对应两个文件——.index文件和.log文件，这些文件位于一个文件夹下，该文件的命名规则为：topic名称+分区序号，eg.first-0，index和log文件以当前segment的第一条消息的offset命名，index文件中存储偏移量和数据大小，以此来查找log文件中的数据
 
+## _kafka生产者_
+
 11、kafka生产者
 
 1. 分区策略
@@ -112,3 +114,63 @@ kafka选择了第二种方案，原因：
     leader维护一个动态的in-sync replica set（ISR），意为和leader保持同步的followe集合，当ISR中的followe完成数据的同步之后，leader就会给follower发送ack，如果follower长时间未向leader同步数据，则该follower将被踢出ISR，该时间阈值由replica.lag.time.max.ms（默认时间10秒钟）参数设定，leader发生故障之后，就会从ISR中选举新的leader
 
 **0.9版本移除数据大小配置的参数，保留默认时间配置的参数**
+
+13、ack参数配置
+
+    acks：
+        0：producer不等待broker的ack，这一操作提供了一个最低的延迟，broker一接收到还没有写入磁盘就已经返回，当broker故障时有可能丢失数据
+
+        1：producer等待broker的ack，partition的leader落盘成功后返回ack，如果在follower同步成功之前leader故障，那么将会丢失数据
+
+        -1（all）：producer等待broker的ack，partition的leader和follower（指ISR队列里的follower）全部罗盘成功后才会返回ack，但是如果在follower同步完成后，broker发送ack之前，leader发生故障，那么会造成数据重复（如果在leader进入ISR队列，而follower因为时间问题未进入ISR，那么也会出现先数据丢失的情况）
+
+14、故障处理细节
+
+    为解决ISR队列中leader挂掉后，选取一个follower为新leader，此新的leader与其他的follwer数据不一致的问题：
+
+    LEO（log end offset）：每个副本的最后一个offset
+    HW（high watemark）：所有副本中最小的LEO，指的是消费者能见到的最大的offset，ISR队列中最小的LEO
+
+**HW之前的数据才对consumer可见，也就是HW只能保证消费者消费数据的一致性，生产者的一致性由ack保证**
+
+1. follower故障
+
+    follower发生故障后会被临时踢出ISR，待该follower恢复后，follower会读取本地磁盘记录的上次的HW，并将log文件高于HW的部分截取掉，从HW开始向leader进行同步，等该follower的LEO大于等于该partition的HW，即follower追上leader之后，就可以重新假如ISR了
+
+2. leader故障
+
+    leader发生故障之后，会从ISR中选出一个新的leader，之后，为保证多个副本之间的数据一致性，其余的follower会先将各自的log文件高于HW的部分截掉，然后从新的leader同步数据到其他的follower后面
+
+**注意：这只能保证副本之间的数据一致性，并不能保证数据不丢失或者不重复**
+
+15、Exactly Once语义
+
+> - At Least Onece：将服务器的ACK级别设置为-1，可以保证Producer到Server之间不会丢失数据
+> - At Most Once：将服务器ACK级别设置为0，可以保证生产者每条消息只会被发送一次
+> - Exactly Once：
+
+At Least Onece可以保证数据不丢失，但是不能保证数据不重复，相对的，At Most Once可以保证数据不重复，但是不能保证数据不丢失，但是，对于一些非常重要的信息，比如说交易数据，下游数据消费者要求及不重复也不丢失，即Exactly Once语义，在0.11版本以前的kafka，对此是无能为力的，只能保证数据不丢失，再在下游消费者对数据做全局去重，对于多个下游应用的情况，每个都需要单独做全局去重，这就对性能造成了很大影响，0.11版本的kafka引入一项重要特性：**幂等性**，所谓的幂等性就是指producer不论向server发送多少次重复数据，server端只会持久化一条，幂等性结合At Least Once语义，就构成了kafka的Exactly Once语义，即：**At Least Once + 幂等性 = Exactly Once**，要启用幂等性，将Producer的参数中enable.idompotence设置为true即可（即ack默认为-1了），kafka的幂等性实现其实就是将原来下游需要做的去重放在了数据上游，开启幂等性的producer在初始化的时候会被分配一个PID（producer id），发往同一partition的消息会附带sequence Number，而broker端会对<PID，Partition，SeqNumber>为主键做缓存，当具有相同主键的消息提交时，broker只会持久化一条。
+但是PID重启就会变化，同时不同的partition也具有不同主键，所以幂等性无法保证跨分区跨会话的Exactly Once
+
+## _kafka消费者_
+
+16、消费方式
+> - **concumer采用pull（拉）模式从broker中读取数据，push（推）模式很难适应消费速率不同的消费者，因为消息发送速率是由broker决定的**，他的目标是尽可能以最快速度传递消息，但是这样很容易造成consumer来不及处理消息，典型的表现就是拒绝服务以及网络拥塞，而pull模式则可以根据consumer的消费能力以适当的速率消费消息，**pull模式不足之处是，如果kafka没有数据，消费者可能会陷入循环中，一直返回空数据**，针对这一点，kafka的消费者在消费数据会传入一个时长参数timeout，如果当前没有可供消费，consumer会等待一段事件之后再返回，这段时长即为timeout。
+
+17、分区分配策略
+
+一个consumer group中有多个consumer，一个topic有多个partition，所以必然会涉及到partition的分配问题，即确定哪个partition由哪个consumer来消费，**kafka有两种分配策略，一个是RoundRobin（轮询），一个是Range（范围）**
+
+RoundRobin按照组来区分，Range按照主题topic来区分，默认Range策略，但Range可能会导致不同组的消费者消费数据不对等的情况
+
+18、offset的维护（保存在zk || kafka本地）
+
+由于consumer再消费过程中可能会出现断电宕机等故障，consumer恢复后，需要从故障前的位置继续消费，所以consumer需要实时记录自己消费到了哪个offset，以便故障恢复后继续消费。
+
+针对zk（zookeeper）：**消费者组+主题+分区**确定offset，同一个组的消费者会接着消费分区下的数据，同一个组名取的offset
+
+针对kafka本地（bootstrap-server）：kafka0.9版本之前，consumer默认将offset保存在zookeeper中，从0.9版本开始，consumer默认将offset保存在kafka一个内置的topic中，该topic为_consumer_offsets。
+> - 修改配置文件consumer.properties：exclude.internal.topics=false
+> - 读取offset：
+**0.11.0.0之前版本：bin/kafka-console-consumer.sh --topic __consumer_offsets --zookeeper hadoop102:2181 --formatter "kafka.coordinator.GroupMetadataManager\$offsetsMessageFormatter" --consumer.config config/consumer.properties --from-beginning**
+**0.11.0.0之后版本(含)：bin/kafka-console-consumer.sh --topic __consumer_offsets --zookeeper hadoop:2181 --formatter "kafka.coordinator.group.GroupMetadataManager\$offsetsMessageFormatter" --consumer.config config/consumer.properties --from-begining**
