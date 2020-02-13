@@ -70,6 +70,7 @@ bin/kafka-console-consumer.sh --topic first --zookeeper hadoop102:2181
 ### _9、启动消费者控制台从一开始的消息开始查看_
 
 bin/kafka-console-consumer.sh --topic first --boostrap-servereper hadoop102:2181 --from-beginning
+
 **.log文件中的数据保存最大时间为7天**
 
 ### _10、kafka工作流程_
