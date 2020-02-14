@@ -112,7 +112,7 @@ kafka选择了第二种方案，原因：
 
 采用第二种方案之后，设想以下情景：leader收到数据，所有follower开始同步数据，但有一个follower，因为某种故障，迟迟不能与leader进行同步，那leader就要一直等下去，直到它完成同步，才能发送ack，如何解决？
 
-    leader维护一个动态的in-sync replica set（ISR），意为和leader保持同步的followe集合，当ISR中的followe完成数据的同步之后，leader就会给follower发送ack，如果follower长时间未向leader同步数据，则该follower将被踢出ISR，该时间阈值由replica.lag.time.max.ms（默认时间10秒钟）参数设定，leader发生故障之后，就会从ISR中选举新的leader
+    leader维护一个动态的in-sync replica set（ISR），意为和leader保持同步的follower集合，当ISR中的follower完成数据的同步之后，leader就会给follower发送ack，如果follower长时间未向leader同步数据，则该follower将被踢出ISR，该时间阈值由replica.lag.time.max.ms（默认时间10秒钟）参数设定，leader发生故障之后，就会从ISR中选举新的leader
 
 **0.9版本移除数据大小配置的参数，保留默认时间配置的参数**
 
