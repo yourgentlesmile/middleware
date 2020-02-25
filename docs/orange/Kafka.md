@@ -80,7 +80,7 @@ bin/kafka-console-consumer.sh --topic first --boostrap-servereper hadoop102:2181
 
     kafka中消息是以topic进行分类的，生产者生产消息，消费者消费消息，都是面向topic的，topic是逻辑上的概念，而partition分区时物理上的概念，每个partition对应于一个log文件，该log文件中存储的就是producer生产的数据，producer生产的数据会被不断追加到该log文件末端，且每条数据都有自己的offset，消费者组中的每个消费者，都会实时记录自己消费到了哪个offset，以便出错恢复时，从上次的为止继续消费
 
-    一个topic分为多个partition，一个partition分为多个segment，一个segment对应两个文件.log、.index文件，由于生产者生产的雄安锡会不断追加到log文件末尾，为防止log文件过大导致数据定位效率低下，kafka采取了分片和索引机制，将每个partition分为多个segment，每个segment对应两个文件——.index文件和.log文件，这些文件位于一个文件夹下，该文件的命名规则为：topic名称+分区序号，eg.first-0，index和log文件以当前segment的第一条消息的offset命名，index文件中存储偏移量和数据大小，以此来查找log文件中的数据
+    一个topic分为多个partition，一个partition分为多个segment，一个segment对应两个文件.log、.index文件，由于生产者生产的数据会不断追加到log文件末尾，为防止log文件过大导致数据定位效率低下，kafka采取了分片和索引机制，将每个partition分为多个segment，每个segment对应两个文件——.index文件和.log文件，这些文件位于一个文件夹下，该文件的命名规则为：topic名称+分区序号，eg.first-0，index和log文件以当前segment的第一条消息的offset命名，index文件中存储偏移量和数据大小，以此来查找log文件中的数据
 
 ## _kafka生产者_
 
